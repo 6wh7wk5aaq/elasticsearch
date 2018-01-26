@@ -39,6 +39,10 @@ import org.elasticsearch.common.blobstore.support.PlainBlobMetaData;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.CountDown;
+import java.security.MessageDigest;
+import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -54,6 +58,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import java.util.Base64;
 
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 
@@ -66,11 +71,15 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
 
     private final Storage client;
     private final String bucket;
+	private final String clientName;
+	private Map<String, byte[]> cseks;
 
-    GoogleCloudStorageBlobStore(Settings settings, String bucket, Storage storageClient) {
+    GoogleCloudStorageBlobStore(Settings settings, String bucket, Storage storageClient, String clientName, Map<String,byte[]> cseks) {
         super(settings);
         this.bucket = bucket;
         this.client = storageClient;
+		this.clientName = clientName;
+		this.cseks = cseks;
 
         if (doesBucketExist(bucket) == false) {
             throw new BlobStoreException("Bucket [" + bucket + "] does not exist");
@@ -186,6 +195,8 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
         try {
             return SocketAccess.doPrivilegedIOException(() -> {
                 Storage.Objects.Get object = client.objects().get(bucket, blobName);
+				final HttpHeaders httpHeaders = csekHeaders();
+				object.setRequestHeaders(httpHeaders);
                 return object.executeMediaAsInputStream();
             });
         } catch (GoogleJsonResponseException e) {
@@ -207,12 +218,32 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
         SocketAccess.doPrivilegedVoidIOException(() -> {
             InputStreamContent stream = new InputStreamContent(null, inputStream);
             stream.setLength(blobSize);
-
+			final HttpHeaders httpHeaders = csekHeaders();
             Storage.Objects.Insert insert = client.objects().insert(bucket, null, stream);
             insert.setName(blobName);
+			insert.setRequestHeaders(httpHeaders);
             insert.execute();
         });
     }
+
+	private HttpHeaders csekHeaders() throws IOException{
+		final HttpHeaders httpHeaders = new HttpHeaders();
+
+		byte[] csek = cseks.get(clientName);
+		
+		if (csek != null && csek.length > 0 ){
+			try {
+			String keybase64 = Base64.getEncoder().encodeToString(csek);
+			String keysha256base64 = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(csek));
+			httpHeaders.set("x-goog-encryption-algorithm", "AES256");
+			httpHeaders.set("x-goog-encryption-key", keybase64);
+			httpHeaders.set("x-goog-encryption-key-sha256", keysha256base64);
+			}catch( NoSuchAlgorithmException e ){
+				throw new IOException("No such Digest algo SHA-256");
+			}
+		}
+		return httpHeaders;
+	}
 
     /**
      * Deletes a blob in the bucket
@@ -303,8 +334,13 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
     void moveBlob(String sourceBlob, String targetBlob) throws IOException {
         SocketAccess.doPrivilegedIOException(() -> {
             // There's no atomic "move" in GCS so we need to copy and delete
-            client.objects().copy(bucket, sourceBlob, bucket, targetBlob, null).execute();
-            client.objects().delete(bucket, sourceBlob).execute();
+			final HttpHeaders httpHeaders = csekHeaders();
+            Storage.Objects.Copy copy = client.objects().copy(bucket, sourceBlob, bucket, targetBlob, null);
+			copy.setRequestHeaders(httpHeaders);
+			copy.execute();
+			Storage.Objects.Delete delete = client.objects().delete(bucket, sourceBlob);
+			delete.setRequestHeaders(httpHeaders);
+			delete.execute();
             return null;
         });
     }

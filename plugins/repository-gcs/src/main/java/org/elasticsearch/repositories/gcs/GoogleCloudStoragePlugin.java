@@ -24,6 +24,7 @@ import java.security.PrivilegedAction;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
 
 import com.google.api.client.auth.oauth2.TokenRequest;
 import com.google.api.client.auth.oauth2.TokenResponse;
@@ -113,9 +114,11 @@ public class GoogleCloudStoragePlugin extends Plugin implements RepositoryPlugin
     }
 
     private final Map<String, GoogleCredential> credentials;
+	private final Map<String, byte[]> cseks;
 
     public GoogleCloudStoragePlugin(Settings settings) {
         credentials = GoogleCloudStorageService.loadClientCredentials(settings);
+		cseks = GoogleCloudStorageService.loadCseks(settings);
     }
 
     // overridable for tests
@@ -126,11 +129,11 @@ public class GoogleCloudStoragePlugin extends Plugin implements RepositoryPlugin
     @Override
     public Map<String, Repository.Factory> getRepositories(Environment env, NamedXContentRegistry namedXContentRegistry) {
         return Collections.singletonMap(GoogleCloudStorageRepository.TYPE,
-            (metadata) -> new GoogleCloudStorageRepository(metadata, env, namedXContentRegistry, createStorageService(env)));
+            (metadata) -> new GoogleCloudStorageRepository(metadata, env, namedXContentRegistry, createStorageService(env), cseks));
     }
 
     @Override
     public List<Setting<?>> getSettings() {
-        return Collections.singletonList(GoogleCloudStorageService.CREDENTIALS_FILE_SETTING);
+		return Arrays.asList(GoogleCloudStorageService.CREDENTIALS_FILE_SETTING,GoogleCloudStorageService.CSEK_SETTING);
     }
 }

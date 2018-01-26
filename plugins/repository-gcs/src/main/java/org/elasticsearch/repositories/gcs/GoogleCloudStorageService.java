@@ -47,12 +47,16 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.io.ByteArrayOutputStream;
 
 interface GoogleCloudStorageService {
 
     /** A json credentials file loaded from secure settings. */
     Setting.AffixSetting<InputStream> CREDENTIALS_FILE_SETTING = Setting.affixKeySetting("gcs.client.", "credentials_file",
         key -> SecureSetting.secureFile(key, null));
+
+	Setting.AffixSetting<InputStream> CSEK_SETTING = Setting.affixKeySetting("gcs.cseks.", "csek",
+		key -> SecureSetting.secureFile(key, null));
 
     /**
      * Creates a client that can be used to manage Google Cloud Storage objects.
@@ -159,7 +163,7 @@ interface GoogleCloudStorageService {
             }
         }
     }
-
+	
     /** Load all secure credentials from the settings. */
     static Map<String, GoogleCredential> loadClientCredentials(Settings settings) {
         Map<String, GoogleCredential> credentials = new HashMap<>();
@@ -176,5 +180,27 @@ interface GoogleCloudStorageService {
             }
         }
         return credentials;
+    }
+
+	/** Load CSEKs from the settings. */
+    static Map<String, byte[]> loadCseks(Settings settings) {
+        Map<String, byte[]> cseks = new HashMap<>();
+		Iterable<Setting<InputStream>> iterable = CSEK_SETTING.getAllConcreteSettings(settings)::iterator;
+		for (Setting<InputStream> concreteSetting : iterable) {
+			try (InputStream csekinput = concreteSetting.get(settings)){
+				ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+				int nRead;
+				byte[] data = new byte[1024];
+				while ((nRead = csekinput.read(data, 0, data.length)) != -1) {
+					buffer.write(data, 0, nRead);
+				}	
+				buffer.flush();
+				byte[] csek = buffer.toByteArray();
+				cseks.put(CSEK_SETTING.getNamespace(concreteSetting), csek);
+			} catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        return cseks;
     }
 }

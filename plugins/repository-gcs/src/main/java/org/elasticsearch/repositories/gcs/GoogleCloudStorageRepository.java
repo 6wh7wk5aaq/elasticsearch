@@ -34,6 +34,7 @@ import org.elasticsearch.repositories.RepositoryException;
 import org.elasticsearch.repositories.blobstore.BlobStoreRepository;
 
 import java.util.function.Function;
+import java.util.Map;
 
 import static org.elasticsearch.common.settings.Setting.Property;
 import static org.elasticsearch.common.settings.Setting.boolSetting;
@@ -72,15 +73,17 @@ class GoogleCloudStorageRepository extends BlobStoreRepository {
     private final boolean compress;
     private final BlobPath basePath;
     private final GoogleCloudStorageBlobStore blobStore;
+	private final Map<String, byte[]> cseks;
 
     GoogleCloudStorageRepository(RepositoryMetaData metadata, Environment environment,
                                         NamedXContentRegistry namedXContentRegistry,
-                                        GoogleCloudStorageService storageService) throws Exception {
+                                        GoogleCloudStorageService storageService, Map<String, byte[]> cseks) throws Exception {
         super(metadata, environment.settings(), namedXContentRegistry);
 
         String bucket = getSetting(BUCKET, metadata);
         String application = getSetting(APPLICATION_NAME, metadata);
         String clientName = CLIENT_NAME.get(metadata.settings());
+		this.cseks = cseks;
 
         String basePath = BASE_PATH.get(metadata.settings());
         if (Strings.hasLength(basePath)) {
@@ -116,7 +119,7 @@ class GoogleCloudStorageRepository extends BlobStoreRepository {
         TimeValue finalReadTimeout = readTimeout;
         Storage client = SocketAccess.doPrivilegedIOException(() ->
             storageService.createClient(clientName, application, finalConnectTimeout, finalReadTimeout));
-        this.blobStore = new GoogleCloudStorageBlobStore(settings, bucket, client);
+        this.blobStore = new GoogleCloudStorageBlobStore(settings, bucket, client, clientName, cseks);
     }
 
 
